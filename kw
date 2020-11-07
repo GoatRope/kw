@@ -1,0 +1,177 @@
+#!/bin/bash
+
+# usage
+function help {
+	echo "kw - Keyword driven note database"
+	echo "Usage:"
+	echo "kw [-a] [-n] [-l limit] [-o offset] [-s offset] [-h] [-?] keyword [keyword..n]"
+	echo "kw -c          : Create new note"
+	echo "kw -u <index>  : Update note with the id <index>"
+	echo "kw -d <index>  : Delete note with the id <index>"
+	echo "kw -i <index>  : View note with the id <index>"
+	echo " "
+	echo "-a             : Show all note fields in results, id, note, keywords, modified datetime"
+	echo "-l <limit>     : Show <limit> number of results : default = 10"
+	echo "-o <offset>    : Skip <offset> number of results : default = 0"
+	echo "-s <offset>    : Skip <offset> number of results : default = 0"
+	echo "-n             : Search note field for given keywords instead of keywords field"
+	echo "-h             : Show help"
+	echo "-?             : Show help"
+	echo " "
+	echo "keyword        : Any number of space separated keywords searched with logical AND"
+}
+
+function getbyindex {
+	command="$sqlcmd \".mode line\" \"select id,note,keywords,modified from data where id=$index\";"
+	eval $command
+}
+
+function getnotedetails () {
+	original_note="$1"
+	echo "$original_note" > /tmp/user_input.tmp
+	$USEEDITOR /tmp/user_input.tmp
+	note=`cat /tmp/user_input.tmp`
+	rm /tmp/user_input.tmp
+}
+
+function getkeywordsdetails () {
+	original_keywords="$1"
+	echo "$original_keywords" > /tmp/user_input.tmp
+	$USEEDITOR /tmp/user_input.tmp
+	keywords=`cat /tmp/user_input.tmp`
+	rm /tmp/user_input.tmp
+}
+
+# set defaults
+USEEDITOR="${EDITOR:-/usr/bin/vim}"
+print=false
+#sqlpath=~/bin/kwdata.sqlite
+sqlpath=~/bin/kwdata.sqlite
+sqlcmd="sqlite3 $sqlpath"
+mode="\".headers off\" \".separator \n \n\n---\n\n\""
+fields="note"
+filter=""
+order="desc"
+limit=10
+offset=0
+searchfield="keywords"
+
+# get the options
+while getopts "u:d:l:o:s:i:cnah?" flag; do
+	case ${flag} in
+		u)
+			index=${OPTARG}
+			getbyindex
+			echo "Edit Note #$index? [y/n]"
+			read -rN1 answer
+			echo ""
+			if [ $answer != "y" ]; then
+				exit
+			fi
+			oldnote=$($sqlcmd ".headers off" "select note from data where id=$index")
+			getnotedetails "$oldnote"
+			oldkeywords=$($sqlcmd ".headers off" "select keywords from data where id=$index")
+			getkeywordsdetails "$oldkeywords"
+			$sqlcmd	"update data set (note, keywords,modified) = ('$note','$keywords',datetime('now')) where id = $index"
+			getbyindex
+			echo "Note $index updated"
+			exit
+			;;
+		d)
+			index=${OPTARG}
+			getbyindex
+			echo "Delete Note #$index? [y/n]"
+			read -rN1 answer
+			echo ""
+			if [ $answer != "y" ]; then
+				exit
+			fi
+			command="$sqlcmd \"delete from data where id = $index\";"
+			eval $command
+			echo "Note $index deleted"
+			exit
+			;;
+		l)
+			limit=${OPTARG}
+			;;
+		o)
+			offset=${OPTARG}
+			;;
+		s)
+			offset=${OPTARG}
+			;;
+		i)
+			index=${OPTARG}
+			getbyindex
+			exit
+			;;
+		c)
+			getnotedetails "New Note"
+			getkeywordsdetails "Space Seperated Keywords"
+			$sqlcmd "insert into data (note, keywords,modified) values ('$note','$keywords',datetime('now'))"
+			exit
+			;;
+		n)
+			searchfield="note"
+			;;
+		a)
+			fields="id,note,keywords,modified"
+			;;
+		h)
+			help
+			exit
+			;;
+		?)
+			help
+			exit
+			;;
+	esac
+done
+shift $((OPTIND-1))
+
+# if no keywords are given
+if [[ -z $1 ]]; then
+	order="desc"
+else
+	filter="$filter where"
+	i=1;
+	for word in "$@"
+	do
+		filter="$filter $searchfield like '%$word%' and"
+		i=$((i + 1));
+	done
+	# remove the last " and" from the filter
+	filter=${filter::${#filter}-4}
+fi
+
+# build sqlcmd
+sqlcount="$sqlcmd"
+sqlcmd="$sqlcmd $mode"
+sqlcmd="$sqlcmd \"select $fields from data"
+sqlcmd="$sqlcmd $filter"
+sqlcmd="$sqlcmd order by modified $order"
+sqlcmd="$sqlcmd limit $limit"
+sqlcmd="$sqlcmd offset $offset"
+sqlcmd="$sqlcmd\";"
+
+# execute
+#echo $sqlcmd
+echo "---";echo
+eval $sqlcmd
+
+sqlcount="$sqlcount \"select count(*) as total from data"
+sqlcount="$sqlcount $filter"
+sqlcount="$sqlcount\";"
+searchtotal=$(eval $sqlcount)
+startnum=$((offset + 1))
+endnum=$((offset + limit))
+if [ $endnum -gt $searchtotal ]
+then
+	endnum=$searchtotal
+fi
+if [ $startnum -gt $endnum ]
+then
+	endnum=$startnum
+fi
+echo "Displayed $startnum to $endnum of $searchtotal"
+
