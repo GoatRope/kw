@@ -1,5 +1,24 @@
 # kw
-Keyword based Note Database using bash and sqlite3
+Keyword based Note Database using bash and sqlite3.
+Allows note entries and keyword searches into a sqlite3 database from the command line.
+
+TL:DR
+
+put the files
+
+kw
+
+kwdata.sqlite
+
+into the bin/ of your user home directory and use 'kw' or 'kw -h'
+
+
+The Sell
+
+Do you have a giant file in your user dir named notes.txt? Do you have a notes folder filled with
+dozens of notes named after things you need to remember? Simplify your command line note taking
+and searching with kw.
+
 
 Requires a sqlite3 database file to be identified by the default variable:
 sqlpath=~/bin/kwdata.sqlite
