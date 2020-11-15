@@ -21,9 +21,23 @@ function help {
 	echo "keyword        : Any number of space separated keywords searched with logical AND"
 }
 
+# set defaults
+USEEDITOR="${EDITOR:-/usr/bin/vim}"
+print=false
+sqlpath=~/git/kw/kwdata.sqlite
+sqlcmd="sqlite3 $sqlpath"
+mode="\".headers off\" \".separator \n\n \n\n---\n\n\""
+fields="note"
+filter=""
+order="desc"
+limit=10
+offset=0
+searchfield="keywords"
+tcols=$(tput cols)
+
 function getbyindex {
 	command="$sqlcmd \".mode line\" \"select id,note,keywords,modified from data where id=$index\";"
-	eval $command
+	eval $command | fold -s -w $tcols
 }
 
 function getnotedetails () {
@@ -42,24 +56,11 @@ function getkeywordsdetails () {
 	rm /tmp/user_input.tmp
 }
 
-# set defaults
-USEEDITOR="${EDITOR:-/usr/bin/vim}"
-print=false
-#sqlpath=~/bin/kwdata.sqlite
-sqlpath=~/bin/kwdata.sqlite
-sqlcmd="sqlite3 $sqlpath"
-mode="\".headers off\" \".separator \n \n\n---\n\n\""
-fields="note"
-filter=""
-order="desc"
-limit=10
-offset=0
-searchfield="keywords"
-
 # get the options
 while getopts "u:d:l:o:s:i:cnah?" flag; do
 	case ${flag} in
 		u)
+			# Update
 			index=${OPTARG}
 			getbyindex
 			echo "Edit Note #$index? [y/n]"
@@ -72,12 +73,16 @@ while getopts "u:d:l:o:s:i:cnah?" flag; do
 			getnotedetails "$oldnote"
 			oldkeywords=$($sqlcmd ".headers off" "select keywords from data where id=$index")
 			getkeywordsdetails "$oldkeywords"
+			# single quotes must be double single quotes for sql
+			note="${note//\'/\'\'}"
+			keywords="${keywords//\'/\'\'}"
 			$sqlcmd	"update data set (note, keywords,modified) = ('$note','$keywords',datetime('now')) where id = $index"
 			getbyindex
 			echo "Note $index updated"
 			exit
 			;;
 		d)
+			# Delete
 			index=${OPTARG}
 			getbyindex
 			echo "Delete Note #$index? [y/n]"
@@ -101,13 +106,18 @@ while getopts "u:d:l:o:s:i:cnah?" flag; do
 			offset=${OPTARG}
 			;;
 		i)
+			# Index
 			index=${OPTARG}
 			getbyindex
 			exit
 			;;
 		c)
+			# Create
 			getnotedetails "New Note"
 			getkeywordsdetails "Space Seperated Keywords"
+			# single quotes must be double single quotes for sql
+			note="${note//\'/\'\'}"
+			keywords="${keywords//\'/\'\'}"
 			$sqlcmd "insert into data (note, keywords,modified) values ('$note','$keywords',datetime('now'))"
 			exit
 			;;
@@ -154,11 +164,11 @@ sqlcmd="$sqlcmd limit $limit"
 sqlcmd="$sqlcmd offset $offset"
 sqlcmd="$sqlcmd\";"
 
-# execute
-#echo $sqlcmd
+# execute SQL
 echo "---";echo
-eval $sqlcmd
+eval $sqlcmd | fold -s -w $tcols
 
+# Get the counts
 sqlcount="$sqlcount \"select count(*) as total from data"
 sqlcount="$sqlcount $filter"
 sqlcount="$sqlcount\";"

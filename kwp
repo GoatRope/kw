@@ -1,0 +1,261 @@
+#!/usr/bin/python3
+
+# TODO: Scrub keywords
+
+import sys
+import os
+import argparse
+import sqlite3
+import textwrap
+
+## Get Commandline Args
+parser = argparse.ArgumentParser(description='Keyword based note creator/searcher')
+# No Flags Args (keywords)
+parser.add_argument('keywords', metavar='keyword', type=str, nargs='*', default=False,
+    help='Space separated keywords searched with logical AND')
+# Flags Without Args (a,c,n)
+parser.add_argument('-a', dest='fields', default='note', action='store_const',
+    const="id, note, keywords, modified", help='Show all fields in returned records')
+parser.add_argument('-c', dest='create', default=False, action='store_const', const=True,
+    help='Create a new record')
+parser.add_argument('-n', dest='searchfield', default='keywords', action='store_const', const='note',
+    help='Search Note field for keywords instead of keywords field')
+# Flags With Args (d,i,l,o,s,u)
+parser.add_argument('-d', dest='delete', default=False, nargs=1, type=int, metavar='ID',
+    help='Delete record <ID>')
+parser.add_argument('-i', dest='index', default=False, nargs=1, type=int, metavar='ID',
+    help='Show record <ID>')
+parser.add_argument('-l', dest='limit', default=[10], nargs=1, type=int,
+    help='Limit the number of records returned to <LIMIT>')
+parser.add_argument('-o', '-s', dest='offset', default=[0], nargs=1, type=int,
+    help='Skip <OFFSET> number of records')
+parser.add_argument('-u', dest='update', default=False, nargs=1, type=int, metavar='ID',
+    help='Update record <ID>')
+# Parse all the args
+args = parser.parse_args()
+
+## Defaults
+# Location of the sqlite3 database file
+dbfile = os.path.expanduser("~/git/kw/kwdata.sqlite")
+kwfilter = ""
+order = "desc"
+editor = os.getenv('EDITOR') if os.getenv('EDITOR') else "/usr/bin/vim"
+tempfile = "/tmp/user_input.tmp"
+trows, tcolumns = os.popen('stty size', 'r').read().split()
+trows = int(trows)
+tcolumns = int(tcolumns)
+wrapper = textwrap.TextWrapper(width=tcolumns,replace_whitespace=False,tabsize=4)
+
+## Defaults from args
+# allfields=False
+# create=False
+# delete=False
+# fields = "note"
+# index=False
+# keywords=[]
+# limit=10
+# offset=0
+# searchfield='keywords'
+# update=False
+
+## Functions
+def showResult(rows):
+    drawseperator = False
+    for row in rows:
+        if drawseperator:
+            print("\n---\n")
+        else:
+            print()
+            drawseperator = True
+        # get note data
+        for i in row:
+            # split on newlines to keep text wraps fom having central newlines
+            par = str.splitlines(str(i))
+            for pa in par:
+                # wrap the newline seperated groups 
+                print(wrapper.fill(pa))
+            print()
+    print("\n---\n")
+
+# Fetch
+def dbfetch():
+    dbconnection = sqlite3.connect(dbfile)
+    db = dbconnection.cursor()
+    sqlcmd = "SELECT " + args.fields + " FROM data " + kwfilter 
+    sqlcmd = sqlcmd + " ORDER BY modified " + order
+    sqlcmd = sqlcmd + " LIMIT " + str(args.limit[0])
+    sqlcmd = sqlcmd + " OFFSET " + str(args.offset[0])
+    db.execute(sqlcmd)
+    rows = db.fetchall()
+    dbconnection.close()
+    return(rows)
+
+# Count
+def dbcount():
+    dbconnection = sqlite3.connect(dbfile)
+    db = dbconnection.cursor()
+    sqlcmd = "SELECT COUNT(*) AS TOTAL FROM data " + kwfilter 
+    db.execute(sqlcmd)
+    rows = db.fetchall()
+    dbconnection.close()
+    return(rows)
+
+# get by index, clear keywords, set kwfilter
+def getbyindex(index):
+    args.keywords=False
+    kwfilter = "where id=" + index
+    return(kwfilter)
+
+# Part one of getting user data. Had to be broken up
+def createfile(current):
+    if os.path.exists(tempfile):
+        os.remove(tempfile)
+    fh = open(tempfile, "w")
+    fh.write(current)
+    fh.close
+
+# Part 2 of user data. This was part of createfile, but it was un reliable in one block
+def getfile():
+    fh = open(tempfile, "r")
+    usertext = fh.read()
+    fh.close
+    # remove temp file
+    if os.path.exists(tempfile):
+        os.remove(tempfile)
+    return(usertext)
+    
+# Order of operation is delete, create, update, index, keyword
+# Delete will exit, create and update should show new values
+# operations should disable all lower operations in the order
+# in case user tries to use exclusive flags
+
+## main
+if (args.delete):
+    ind=str(args.delete[0])
+    args.fields = "id, note, keywords, modified"
+    kwfilter = getbyindex(ind)
+    rows = dbfetch()
+    showResult(rows)
+    print("Delete id " + ind + "? (y/n)")
+    ans = sys.stdin.read(1)
+    if (ans != 'y'):
+        print("Delete Canceled")
+        sys.exit()
+    dbconnection = sqlite3.connect(dbfile)
+    db = dbconnection.cursor()
+    db.execute("DELETE FROM data WHERE id=(?)", (ind,))
+    dbconnection.commit()
+    dbconnection.close()
+    print("Deleted id ",ind)
+    sys.exit()
+
+if (args.create):
+    # Overide other flag options
+    args.update = False
+    args.index = False
+    args.keywords = []
+    # Get the note    
+    createfile("Enter Your Note")
+    os.system('%s %s' % (editor, tempfile))
+    note = getfile()
+    # Get the Keywords
+    createfile("Space separated keywords")
+    os.system('%s %s' % (editor, tempfile))
+    keywords = getfile()
+    dbconnection = sqlite3.connect(dbfile)
+    db = dbconnection.cursor()
+    db.execute("INSERT INTO data (note, keywords, modified) VALUES (?,?,datetime('now'))",
+        (note,keywords,))
+    dbconnection.commit()
+    dbconnection.close()
+    args.fields = "id, note, keywords, modified"
+    args.limit = [1]
+    args.order = "desc"
+
+if (args.update):
+    # Overide other flag options
+    args.index = False
+    args.keywords = []
+    # Show target record and confirm update
+    ind = str(args.update[0])
+    args.fields = "id, note, keywords, modified"
+    kwfilter = getbyindex(ind)
+    rows = dbfetch()
+    showResult(rows)
+    print("Update id " + ind + "? (y/n)")
+    ans = sys.stdin.read(1)
+    if (ans != 'y'):
+        print("Update Canceled")
+        sys.exit()
+    # Get the old Note
+    args.fields = "note"
+    args.limit = "1"
+    kwfilter = getbyindex(ind)
+    oldnote = dbfetch()
+    # Convert tuple to string
+    oldn = ''.join(oldnote[0])
+    # Get the new Note    
+    createfile(oldn)
+    os.system('%s %s' % (editor, tempfile))
+    note = getfile()
+    # Get the old keywords
+    args.fields = "keywords"
+    args.limit = "1"
+    kwfilter = getbyindex(ind)
+    oldkeywords = dbfetch()
+    # Convert tuple to string
+    oldk = ''.join(oldkeywords[0])
+    # Get the new Keywords
+    createfile(oldk)
+    os.system('%s %s' % (editor, tempfile))
+    keywords = getfile()
+    # Do the database deed
+    dbconnection = sqlite3.connect(dbfile)
+    db = dbconnection.cursor()
+    db.execute(
+        "UPDATE data set (note, keywords, modified) = (?,?,datetime('now')) where id = (?)",
+        (note,keywords,ind,))
+    dbconnection.commit()
+    dbconnection.close()
+    # Set options to display the changes
+    args.fields = "id, note, keywords, modified"
+    args.limit = [1]
+    args.order = "desc"
+
+# Check for get by index
+if (args.index):
+    ind = str(args.index[0])
+    args.fields = "id, note, keywords, modified"
+    args.limit = [1]
+    kwfilter = getbyindex(ind)
+
+# Create a search filter based on the keywords and get results
+if (args.keywords):
+    kwfilter = kwfilter + "where"
+    i = 1
+    keywords = []
+    # Split up quoted word groups to avoid injection
+    for word in args.keywords:
+        keywords = keywords + word.split()
+    # Create an AND'd filter
+    for word in keywords:
+        kwfilter = kwfilter + " " + args.searchfield + " like \'%" + word + "%\' and"
+        i = i + 1
+    # strip 4 chars to remove " and"
+    kwfilter = kwfilter[:-4]
+
+# Connect to the db and get the search
+rows = dbfetch()
+showResult(rows)
+
+# Show the counts
+count = dbcount()
+# Convert tupule to int
+count = int(''.join(map(str, count[0])))
+startnum = 0 if (count == 0) else args.offset[0] + 1
+endnum = 0 if (count == 0) else args.offset[0] + args.limit[0]
+if (endnum > count):
+    endnum = count
+if (startnum > endnum):
+    endnum = startnum
+print("Displayed", startnum, "to", endnum, "of", count, "\n")
