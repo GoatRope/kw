@@ -1,13 +1,16 @@
 # kw
-Keyword based Note Database using bash and sqlite3.
+Keyword based Note Database using bash and sqlite3, or python with sqlite module.
 Allows note entries and keyword searches into a sqlite3 database from the command line.
+kw  - bash version 4+
+kwp - python 3 
 
 **TL;DR**
 
 put the files
 kw
+kwp
 kwdata.sqlite
-into the bin/ of your user home directory and use 'kw' or 'kw -h'
+into the bin/ of your user home directory and use 'kw -h' or 'kwp -h'
 
 **The Sell**
 
